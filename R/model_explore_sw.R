@@ -13,20 +13,10 @@ library(fpp3)
 library(rnaturalearth)
 library(readxl)
 
+fc <- F
+
 #load data
 load(here::here("data/all_cb_data.rdata"))
-
-ky_temps <- 
-  read_excel(here::here('data/kyoto_temps.xlsx')) %>% 
-  dplyr::select(year = Year,
-                mar = Mar,
-                feb = Feb,
-                jmax = Jan_max,
-                fmax = Feb_max,
-                mmax = Mar_max,
-                jpre = Jan_precip,
-                fpre = Feb_precip,
-                mpre = Mar_precip)
 
 bas_temps <- 
   read_excel(here::here("data/basel_temps2.xlsx")) %>% 
@@ -82,7 +72,7 @@ bas_temps4 <- left_join(feb,
                         jan) %>% 
   left_join(.,mar)
 
-# japan 
+# switzerland
 sw_sf <- ne_countries(country  = "switzerland",
                       returnclass = "sf",
                       scale = "medium") %>% 
@@ -105,19 +95,18 @@ sw <-
   st_as_sf(.,coords = c("long","lat"), 
            crs = 4326) %>% 
   st_transform(st_crs("+proj=utm +zone=32 +datum=WGS84 +units=km +no_defs")) %>% 
-  st_intersection(.,sw_bf) %>% 
   dream::sfc_as_cols(names = c("longitude","latitude")) %>% 
   st_set_geometry(NULL)
 
 y <- 1984
 sw_lats <- sw %>% 
-  filter(year >= y) %>% 
+  filter(year >= y) %>%
   group_by(location) %>% 
   summarise(longitude = mean(longitude),
             latitude = mean(latitude))
 
 sw_sample <- sw %>% 
-  filter(year >= y) %>% 
+  filter(year >= y) %>%
   group_by(location, bloom_date) %>% 
   dplyr::summarise(bloom_doy = mean(bloom_doy, na.rm = T)) %>% 
   left_join(.,sw_lats) %>% 
@@ -133,7 +122,6 @@ sw_sample2 <- sw_sample %>%
   left_join(.,bas_temps4) %>%
   na.exclude()
 
-
 m <- gam(bloom_doy ~
            # s(year, bs = "fs") +
            s(bloom_doy_l1) +
@@ -146,9 +134,9 @@ m <- gam(bloom_doy ~
          data = sw_sample2)
 # plot(m)
 # draw(m)
-# acf(m$residuals)
-# summary(m)
-# appraise(m)
+acf(m$residuals)
+summary(m)
+appraise(m)
 y <- 1988
 pred_df1 <- sw_sample2 %>% 
   filter(location == "Switzerland/Liestal",
@@ -170,14 +158,94 @@ ndf <- tibble(longitude = 404.3579,
               f_m_temp = c(pred_df1 %>% pull(f_m_temp), temp_2022),
               j_m_tmax = c(pred_df1 %>% pull(j_m_tmax), jmax_2022))
 
-pred_df <- bind_cols(sw_sample2 %>% 
-                       filter(str_detect(location, "Switzerland/Liestal"),
-                              year >= y) %>% 
-                       add_row(year = 2022),
-                     predict(m, newdata = ndf,
-                             se.fit = T))
-ggplot(pred_df) +
-  geom_point(aes(x = year, y = bloom_doy)) +
-  geom_line(aes(x = year, y = fit))
+if (fc){
+  base <- ndf %>% tsibble(index = "year")
+  
+  output_bdl1 <- 
+    base %>% 
+    model(
+      bloom_doy_l1 = NNETAR(bloom_doy_l1)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_fmpr <- 
+    base %>% 
+    model(
+      f_m_precip = NNETAR(f_m_precip)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_jmtmax <- 
+    base %>% 
+    model(
+      j_m_tmax = NNETAR(j_m_tmax)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_fmtmax <- 
+    base %>% 
+    model(
+      f_m_tmax = NNETAR(f_m_tmax)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_fmtem <- 
+    base %>% 
+    model(
+      f_m_temp = NNETAR(f_m_temp)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  sw_proj <- 
+    output_bdl1 %>% 
+    dplyr::select(year, bloom_doy_l1 = .mean) %>% 
+    left_join(.,output_fmpr %>% 
+                dplyr::select(year, f_m_precip = .mean)) %>% 
+    left_join(.,output_jmtmax %>% 
+                dplyr::select(year, j_m_tmax = .mean)) %>% 
+    left_join(.,output_fmtmax %>% 
+                dplyr::select(year, f_m_tmax = .mean)) %>% 
+    left_join(.,output_fmtem %>% 
+                dplyr::select(year, f_m_temp = .mean)) 
+    
+  save(sw_proj, file = here::here("data/sw_env_fc.rdata"))
+} else {
+  load(here::here("data/sw_env_fc.rdata"))
+}
 
-pred_df %>% filter(year == 2022) %>% pull(fit)
+
+liestal <-
+  sw_sample2 %>% 
+  filter(str_detect(location, "Switzerland/Liestal"),
+         year >= y)
+
+ndf2 <- ndf %>% 
+  bind_rows(
+  sw_proj %>% 
+    mutate(bloom_doy_l2 = lag(bloom_doy_l1),
+         latitude = unique(ndf$latitude),
+         longitude = unique(ndf$longitude)) 
+  ) %>% 
+  mutate(bloom_doy_l2 = ifelse(year == 2023, 87, bloom_doy_l2))
+
+pred <- 
+  predict(m, newdata = ndf2, se.fit = T)
+
+pred_df <- tibble(bloom_doy = pred$fit,
+                  year = ndf2$year) 
+
+ggplot(pred_df) +
+  geom_point(aes(x = year, y = bloom_doy))
+
+# write out
+sw_proj <- pred_df %>% 
+  filter(year > 2021) %>% 
+  mutate(location = "liestal, ch",
+         bloom_doy = round(bloom_doy)) %>% 
+  dplyr::select(bloom_doy, year, location)
+write.csv(sw_proj, file = here::here("data/sw_projection.csv"), row.names = F)

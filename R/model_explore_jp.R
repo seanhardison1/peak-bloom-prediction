@@ -13,6 +13,8 @@ library(fpp3)
 library(rnaturalearth)
 library(readxl)
 
+fc <- F
+
 ky_temps <- 
   read_excel(here::here('data/kyoto_temps.xlsx')) %>% 
   dplyr::select(year = Year,
@@ -29,12 +31,6 @@ ky_temps <-
 load(here::here("data/all_cb_data.rdata"))
 
 # japan 
-jp_sf <- ne_countries(country  = "japan",
-                      returnclass = "sf",
-                      scale = "medium") %>% 
-  st_transform(st_crs("+proj=utm +zone=54 +datum=WGS84 +units=km +no_defs")) %>% 
-  st_union() 
-
 ky_bf <- japan %>% 
   filter(str_detect(location, "Kyoto")) %>% 
   dplyr::select(long, lat) %>% 
@@ -109,14 +105,78 @@ ndf <- tibble(longitude = 19.2106,
               fmax = c(jp_sample2 %>% filter(location == "Japan/Kyoto") %>% pull(fmax),9.0),
               feb = c(jp_sample2 %>% filter(location == "Japan/Kyoto") %>% pull(feb),4.2),
               jmax = c(jp_sample2 %>% filter(location == "Japan/Kyoto") %>% pull(jmax),8.2))
-pred_df <- bind_cols(jp_sample2 %>% 
-                       filter(str_detect(location, "Kyoto")) %>% 
-                       add_row(year = 2022),
-                     predict(m, newdata = ndf,
-                             se.fit = T))
+
+if (fc){
+  base <- ndf %>% tsibble(index = "year")
+  
+  output_fpre <- 
+    base %>% 
+    model(
+      fpre = NNETAR(fpre)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_fmax <- 
+    base %>% 
+    model(
+      fmax = NNETAR(fmax)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_feb <- 
+    base %>% 
+    model(
+      feb = NNETAR(feb)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  output_jmax <- 
+    base %>% 
+    model(
+      jmax = NNETAR(jmax)
+    ) %>% 
+    forecast(h = 10) %>% 
+    tibble()
+  
+  jp_proj <- 
+    output_fpre %>% 
+    dplyr::select(year, fpre = .mean) %>% 
+    left_join(.,output_fmax %>% 
+                dplyr::select(year, fmax = .mean)) %>% 
+    left_join(.,output_feb %>% 
+                dplyr::select(year, feb = .mean)) %>% 
+    left_join(.,output_jmax %>% 
+                dplyr::select(year, jmax = .mean))
+  
+  save(jp_proj, file = here::here("data/jp_env_fc.rdata"))
+} else {
+  load(here::here("data/jp_env_fc.rdata"))
+}
+
+
+ndf2 <- ndf %>% 
+  bind_rows(
+    jp_proj %>% 
+      mutate(latitude = unique(ndf$latitude),
+             longitude = unique(ndf$longitude)) 
+  ) 
+
+pred <- 
+  predict(m, newdata = ndf2, se.fit = T)
+
+pred_df <- tibble(bloom_doy = pred$fit,
+                  year = ndf2$year) 
+
 ggplot(pred_df) +
-  geom_point(aes(x = year, y = bloom_doy)) +
-  geom_line(aes(x = year, y = fit))
+  geom_point(aes(x = year, y = bloom_doy)) 
 
-
-pred_df %>% filter(year == 2022) %>% pull(fit)
+# write out
+jp_proj <- pred_df %>% 
+  filter(year > 2021) %>% 
+  mutate(location = "kyoto, jp",
+         bloom_doy = round(bloom_doy)) %>% 
+  dplyr::select(bloom_doy, year, location)
+write.csv(jp_proj, file = here::here("data/jp_projection.csv"), row.names = F)
