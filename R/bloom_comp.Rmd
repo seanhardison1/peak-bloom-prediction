@@ -2,6 +2,7 @@
 title: "Cherry Blossom Prediction Competition"
 author: Sean Hardison
 output: pdf_document
+bibliography: bloom_bib.bib
 ---
 
 ```{r setup, include=TRUE, message = F, echo = F}
@@ -28,12 +29,25 @@ fc <- F
 load(here::here("data/all_cb_data.rdata"))
 ```
 
-# Kyoto, Japan
+# Narrative
 
+Cherry trees of genus *Prunus* are well-known across the northern hemisphere due to their showy bloom displays marking the onset of spring. In Japan, the annual cherry blossom festival, or Ohanami, is a culturally significant event extending back to the early 700s A.D. [@moriuchi2019]. Given the importance of the cherry blossom festival to Japanese culture, the Japanese people have been tracking the bloom phenology of native cherries for more than 700 years [@aono2008]. With the gifting of Japanese cherries to other countries like the United States, Canada, and Switzerland in the 20th century, the study and celebration of blooms has become a global phenomenon.
+
+The long-term and spatially distributed nature of cherry blossom phenological data provides a unique glimpse into impacts of climate change and development on a culturally important genus. Further, the wide availability of bloom phenological data positions the cherry blossom as an indicator species for the effects of climate change on tree phenology more broadly. In Japan, studies have shown that cherry blossoms in more urbanized areas bloom earlier, as do those exposed to higher spring mean temperatures [@primack2009; @hsu2021]. Process-based models of peak bloom date for cherry blossoms in Washington, DC have found that future warming will continue to shift the date of peak bloom earlier into the winter months; increasing by nearly two weeks by the 2050s under a high greenhouse gas emission scenario [@chung2011]. Cherry trees are uniquely positioned as cultural icons and key indicators of climate change worldwide, and widespread concern over their shifting bloom phenologies [@sakurai2011] may bolster support for government action on climate change.
+
+A key focus the study of cherry blossom phenology is its predictability, which has both ecological and economic implications. More than 1.5 million people travel to Washington, D.C. annually to attend the National Cherry Blossom Festival [@ncbf2022], providing millions of dollars in revenue for local vendors. Therefore, having accurate projections of peak bloom date benefits not just the attendees of cherry blossom festivals, but also small business owners wherever festivals are held. Previous studies have had success in predicting historical peak bloom dates (e.g., @chung2011), although these works do not provide point estimates on a year-by-year basis, perhaps due to its assumed futility. Indeed, the US National Park Service has gone so far as to suggest that predicting peak bloom is "almost impossible" outside of 10 days prior [@nps2022].
+
+Given our understanding of how climate impacts the phenologies of cherry blossoms, the goal of this work is to determine whether predictive models informed by climate variables are useful in predicting future peak bloom dates. Further, I assess how climate variables vary in importance in models of peak bloom date in varying locations across the world. I show that the local climate is important in determining bloom dates, but the use of environmental data as covariates in model projections is limited by our skill in projecting covariates into the future.
+
+## Methods
+
+I developed regression models of peak bloom date at four locations (Kyoto, Japan; Vancouver, British Columbia; Washington, D.C.; Liestal, Switzerland). I incorporated several different covariates into these models that differed at each location according to model fit. I fitted these models using the `mgcv` R package and evaluated residual behavior using the `gratia` package [@wood2006; @simpson2021]. I next projected model covariates 10 years into the future using neural network autoregression [@hyndman2008], which I then appended to the observed data to use in prediction. Models of peak bloom date were created using generalized additive models (GAMs), which are generalized linear models that allow for non-linear responses to be modeled as smooth functions of covariates [@wood2006]. All response distributions were assumed Gaussian with identity link. The text below provides code and more detailed explanations.
+
+# Kyoto, Japan
 
 ### Environmental covariates
 
-The environmental covariates I used in model development were drawn from the Japan Meteorological Agency (see (https://www.data.jma.go.jp/obd/stats/etrn/view/monthly_s3_en.php?block_no=47895&view=13)[https://www.data.jma.go.jp/obd/stats/etrn/view/monthly_s3_en.php?block_no=47895&view=13]).
+The environmental covariates I used in model development were drawn from the Japan Meteorological Agency (see (<https://www.data.jma.go.jp/obd/stats/etrn/view/monthly_s3_en.php?block_no=47895&view=13>)[<https://www.data.jma.go.jp/obd/stats/etrn/view/monthly_s3_en.php?block_no=47895&view=13>]).
 
 ```{r}
 ky_temps <- 
@@ -50,7 +64,7 @@ ky_temps <-
 
 ```
 
-### Data processing 
+### Data processing
 
 ```{r}
 # Identify the Kyoto data and draw a 200 km buffer around the site
@@ -114,7 +128,7 @@ jp_sample2 <- jp_sample %>%
 
 ### Model fitting
 
-Here I used a generalized additive model to evaluate how the date of first bloom varies within the region around Kyoto. I used a tensor product interaction term to incorporate data from nearby sites into bloom date prediction in Kyoto. The environmental covariates include February precipitation (`fpre`), February average daily maximum temperature (`fmax`), January average daily maximum temperature (`jmax`), and February daily mean temperature (`ftemp`).
+Here I used a GAM to evaluate how the date of peak bloom varies within the region around Kyoto. I used a tensor product interaction term to incorporate data from nearby sites into bloom date prediction in Kyoto. This creates a spatiotemporal smooth of peak bloom that accounts for random variability in peak bloom outside of that attributable to environmental variables [@anderson2022; @wood2006]. The environmental covariates include February precipitation (`fpre`), February average daily maximum temperature (`fmax`), January average daily maximum temperature (`jmax`), and February daily mean temperature (`ftemp`).
 
 ```{r}
 m <- gam(bloom_doy ~ 
@@ -126,9 +140,9 @@ m <- gam(bloom_doy ~
          data = jp_sample2)
 ```
 
-### Prediction data  
+### Prediction data
 
-I fitted the model using data through 2021. However, I assumed that the available data for February 2022 (through 2/26) would be representative of the month of February, and so used those data in the 2022 projection. I add those data to the prediction data here. 
+I fitted the model using data through 2021. However, I assumed that the available data for February 2022 (through 2/26) would be representative of the month of February, and so used those data in the 2022 projection. I add those data to the prediction data here.
 
 ```{r}
 ndf <- tibble(longitude = 19.2106,
@@ -144,9 +158,9 @@ ndf <- tibble(longitude = 19.2106,
                          filter(location == "Japan/Kyoto") %>% pull(jmax),8.2))
 ```
 
-### Projecting environmental data  
+### Projecting environmental data
 
-I used neural network autoregression to generate projections of environmental data, which I then bound to the prediction data created in the previous step. See https://otexts.com/fpp2/nnetar.html for description of the method.
+I used neural network autoregression to generate projections of environmental data [@hyndman2008], which I then bound to the prediction data created in the previous step. See <https://otexts.com/fpp2/nnetar.html> for description of the method.
 
 ```{r}
 if (fc){
@@ -200,7 +214,7 @@ if (fc){
 }
 ```
 
-### Projection  
+### Projection
 
 Here I predict from the GAM given observed and projected environmental covariates.
 
@@ -237,7 +251,7 @@ ggplot() +
 
 # Vancouver, British Columbia
 
-I built my model for Vancouver, BC around data collected through the VCBF Neighborhood Blog (https://forums.botanicalgarden.ubc.ca/threads/kerrisdale.36008/). I used the "date of first post" as a proxy for the date of first bloom.
+I built my model for Vancouver, BC around data collected through the VCBF Neighborhood Blog (<https://forums.botanicalgarden.ubc.ca/threads/kerrisdale.36008/>). I used the "date of first post" as a proxy for the date of peak bloom.
 
 ### Environmental covariates
 
@@ -288,7 +302,7 @@ bc_blooms <- read_excel(here::here("data/bc_blooms.xlsx")) %>%
 
 ### Model fitting
 
-I again chose a GAM with average daily max temperatures in February and March included as model covariates. 
+I again chose a GAM with average daily max temperatures in February and March included as model covariates.
 
 ```{r}
 m <- gam(bloom_doy ~ s(f_tmax, k = 3) + s(m_tmax), 
@@ -351,8 +365,6 @@ ggplot() +
   theme_bw()
 ```
 
-
-
 # Washington, DC
 
 ### Environmental covariates
@@ -399,7 +411,7 @@ dc_temps3 <- jan %>%
 
 ### Projecting environmental data
 
-I included average maximum daily temperatures for both February and March in the model. Similar to my approach for the Kyoto model, I assumed that the data currently available for February was representative of the entire month and used that in the model. However, I still needed to project March data for the 2022 prediction, and February for >2022, so I did that here first. In the final projection, I replaced the projected data for February 2022 with the "true" value (through 2/26).
+I included average maximum daily temperatures for both February and March in the model. Similar to my approach for the Kyoto model, I assumed that the data currently available for February was representative of the entire month and used that in the model. However, I still needed to project March data for the 2022 prediction, and February for \>2022, so I did that here first. In the final projection, I replaced the projected data for February 2022 with the "true" value (through 2/26).
 
 ```{r}
 # project environmental data----
@@ -436,10 +448,10 @@ proj_df <-
               dplyr::select(year, m_tmax = .mean))
 ```
 
-
 ### Model fitting
 
-There was a strong temporal trend component in the data so I included a smoother for `year`, along with smooths with average maximum daily temperatures in March and February. 
+There was a strong temporal trend component in the data so I included a smoother for `year`, along with smooths with average maximum daily temperatures in March and February.
+
 ```{r}
 dc_sample <- dc %>% 
   left_join(.,dc_temps3) %>% 
@@ -748,3 +760,4 @@ write.csv(submission,
           row.names = F)
 ```
 
+# References
